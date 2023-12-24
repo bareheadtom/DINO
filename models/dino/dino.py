@@ -32,6 +32,7 @@ from .segmentation import (DETRsegm, PostProcessPanoptic, PostProcessSegm,
                            dice_loss)
 from .deformable_transformer import build_deformable_transformer
 from .utils import sigmoid_focal_loss, MLP
+from .IAT.model import IAT
 
 from ..registry import MODULE_BUILD_FUNCS
 from .dn_components import prepare_for_cdn,dn_post_process
@@ -44,6 +45,7 @@ class DINO(nn.Module):
                     fix_refpoints_hw=-1,
                     num_feature_levels=1,
                     nheads=8,
+                    pre_encoder = None,
                     # two stage
                     two_stage_type='no', # ['no', 'standard']
                     two_stage_add_query_num=0,
@@ -78,6 +80,7 @@ class DINO(nn.Module):
         self.hidden_dim = hidden_dim = transformer.d_model
         self.num_feature_levels = num_feature_levels
         self.nheads = nheads
+        self.pre_encoder = pre_encoder
         self.label_enc = nn.Embedding(dn_labelbook_size + 1, hidden_dim)
 
         # setting query dim
@@ -235,6 +238,11 @@ class DINO(nn.Module):
         """
         if isinstance(samples, (list, torch.Tensor)):
             samples = nested_tensor_from_tensor_list(samples)
+        if self.pre_encoder != None:
+            #print("preencoder",samples.tensors.shape)
+            _, _, x = self.pre_encoder(samples.tensors)
+            samples.tensors = x
+            #print("after preencoder",samples.tensors.shape)
         features, poss = self.backbone(samples)
 
         srcs = []
@@ -266,7 +274,8 @@ class DINO(nn.Module):
         else:
             assert targets is None
             input_query_bbox = input_query_label = attn_mask = dn_meta = None
-
+        #print("\nsrcs, masks, input_query_bbox, poss,input_query_label,attn_mask")
+        #print(srcs, masks, input_query_bbox, poss,input_query_label,attn_mask)
         hs, reference, hs_enc, ref_enc, init_box_proposal = self.transformer(srcs, masks, input_query_bbox, poss,input_query_label,attn_mask)
         # In case num object=0
         hs[0] += self.label_enc.weight[0,0]*0.0
@@ -707,7 +716,10 @@ def build_dino(args):
     #     num_classes = 366
     # if args.dataset_file == 'vanke':
     #     num_classes = 51
+    if args.dataset_file == 'exdark':
+        args.num_classes = 13
     num_classes = args.num_classes
+    print("\n*****************num_classes",num_classes)
     device = torch.device(args.device)
 
     backbone = build_backbone(args)
@@ -730,6 +742,26 @@ def build_dino(args):
     except:
         dec_pred_bbox_embed_share = True
 
+    pre_encoder = None
+    if args.pre_encoder:
+        initfcfg = dict(type='Pretrained',checkpoint='/root/autodl-tmp/projects/Illumination-Adaptive-Transformer/IAT_high/IAT_mmdetection/LOL_pretrain.pth')
+        checkpath = '/root/autodl-tmp/projects/Illumination-Adaptive-Transformer/IAT_high/IAT_mmdetection/LOL_pretrain.pth'
+        pre_encoder = IAT(in_dim=3, with_global=True,init_cfg=initfcfg)
+        precheckpoint = torch.load(checkpath, map_location='cpu')
+        mystat = pre_encoder.state_dict()
+        precheckpoint_new = {}
+        precheckpoint_miss = {}
+        for k, v in precheckpoint.items():
+            if k in mystat and v.shape == mystat[k].shape:
+                precheckpoint_new[k] = v
+            else:
+                precheckpoint_miss[k] = v
+        print("miss pre_encoder precheckpoint_miss",precheckpoint_miss)
+        mystat.update(precheckpoint_new)
+        pre_encoder.load_state_dict(mystat)
+    else:
+        print("not use pre_encoder")
+
     model = DINO(
         backbone,
         transformer,
@@ -742,6 +774,7 @@ def build_dino(args):
         fix_refpoints_hw=args.fix_refpoints_hw,
         num_feature_levels=args.num_feature_levels,
         nheads=args.nheads,
+        pre_encoder=pre_encoder,
         dec_pred_class_embed_share=dec_pred_class_embed_share,
         dec_pred_bbox_embed_share=dec_pred_bbox_embed_share,
         # two stage

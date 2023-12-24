@@ -22,7 +22,9 @@ import datasets
 from datasets import build_dataset, get_coco_api_from_dataset
 from engine import evaluate, train_one_epoch, test
 
+#python main.py -c config/DINO/DINO_4scale.py --options dn_scalar=100 embed_init_tgt=TRUE dn_label_coef=1.0 dn_bbox_coef=1.0 use_ema=False dn_box_noise_scale=1.0 --finetune_ignore label_enc.weight class_embed --pretrain_model_path ./pretrained/checkpoint0033_4scale.pth > /root/autodl-tmp/outputs/DINO
 
+#python main.py -c config/DINO/DINO_4scale.py --options dn_scalar=100 embed_init_tgt=TRUE dn_label_coef=1.0 dn_bbox_coef=1.0 use_ema=False dn_box_noise_scale=1.0 --finetune_ignore label_enc.weight class_embed --resume /root/autodl-tmp/projects/DINO/logs/DINO/R50-MS4/R50-MS420231220201013/checkpoint0023.pth 
 
 def get_args_parser():
     parser = argparse.ArgumentParser('Set transformer detector', add_help=False)
@@ -34,14 +36,14 @@ def get_args_parser():
         'in xxx=yyy format will be merged into config file.')
 
     # dataset parameters
-    parser.add_argument('--dataset_file', default='coco')
-    parser.add_argument('--coco_path', type=str, default='/comp_robot/cv_public_dataset/COCO2017/')
+    parser.add_argument('--dataset_file', default='exdark')
+    parser.add_argument('--coco_path', type=str, default='/root/autodl-tmp/COCO/')
     parser.add_argument('--coco_panoptic_path', type=str)
     parser.add_argument('--remove_difficult', action='store_true')
     parser.add_argument('--fix_size', action='store_true')
 
     # training parameters
-    parser.add_argument('--output_dir', default='',
+    parser.add_argument('--output_dir', default='/root/autodl-tmp/outputs/DINO/'+str(datetime.datetime.now().strftime("%Y%m%d%H%M%S")),
                         help='path where to save, empty for no saving')
     parser.add_argument('--note', default='',
                         help='add some notes to the experiment')
@@ -61,6 +63,9 @@ def get_args_parser():
 
     parser.add_argument('--save_results', action='store_true')
     parser.add_argument('--save_log', action='store_true')
+
+    parser.add_argument('--pre_encoder', default=False, type=bool,
+                        help="use pre_encoder")
 
     # distributed training parameters
     parser.add_argument('--world_size', default=1, type=int,
@@ -84,6 +89,7 @@ def build_model_main(args):
     return model, criterion, postprocessors
 
 def main(args):
+    
     utils.init_distributed_mode(args)
     # load cfg file and update the args
     print("Loading config file from {}".format(args.config_file))
@@ -130,7 +136,10 @@ def main(args):
     if args.frozen_weights is not None:
         assert args.masks, "Frozen training is meant for segmentation only"
     print(args)
-
+    # with open('args.json', 'w') as f:
+    #     args_json = json.dump(vars(args),f)
+    # print(args_json) 
+    # return 
     device = torch.device(args.device)
 
     # fix the seed for reproducibility
@@ -205,6 +214,7 @@ def main(args):
     if os.path.exists(os.path.join(args.output_dir, 'checkpoint.pth')):
         args.resume = os.path.join(args.output_dir, 'checkpoint.pth')
     if args.resume:
+        print("resume from  model args.resume",args.resume)
         if args.resume.startswith('https'):
             checkpoint = torch.hub.load_state_dict_from_url(
                 args.resume, map_location='cpu', check_hash=True)
@@ -222,8 +232,11 @@ def main(args):
             optimizer.load_state_dict(checkpoint['optimizer'])
             lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
             args.start_epoch = checkpoint['epoch'] + 1
+    else:
+        print("not resume from pretrained model ")
 
     if (not args.resume) and args.pretrain_model_path:
+        print("load from pretrained model args.pretrain_model_path",args.pretrain_model_path)
         checkpoint = torch.load(args.pretrain_model_path, map_location='cpu')['model']
         from collections import OrderedDict
         _ignorekeywordlist = args.finetune_ignore if args.finetune_ignore else []
@@ -247,7 +260,9 @@ def main(args):
                 ema_m.module.load_state_dict(utils.clean_state_dict(checkpoint['ema_model']))
             else:
                 del ema_m
-                ema_m = ModelEma(model, args.ema_decay)        
+                ema_m = ModelEma(model, args.ema_decay)  
+    else:
+        print("not load from pretrained model ")     
 
 
     if args.eval:
@@ -263,6 +278,11 @@ def main(args):
                 f.write(json.dumps(log_stats) + "\n")
 
         return
+    
+    test_stats, coco_evaluator = evaluate(
+        model, criterion, postprocessors, data_loader_val, base_ds, device, args.output_dir,
+        wo_class_error=wo_class_error, args=args, logger=(logger if args.save_log else None)
+    )
 
     print("Start training")
     start_time = time.time()
@@ -386,3 +406,36 @@ if __name__ == '__main__':
     if args.output_dir:
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     main(args)
+
+
+# args: Namespace(add_channel_attention=False, add_pos_value=False, amp=False, aux_loss=True, backbone='resnet50', 
+#                 backbone_freeze_keywords=None, batch_norm_type='FrozenBatchNorm2d', batch_size=1, bbox_loss_coef=5.0, 
+#                 box_attn_type='roi_align', clip_max_norm=0.1, cls_loss_coef=1.0, coco_panoptic_path=None, 
+#                 coco_path='/root/autodl-tmp/COCO/', config_file='config/DINO/DINO_4scale.py', dabdetr_deformable_decoder=False, 
+#                 dabdetr_deformable_encoder=False, dabdetr_yolo_like_anchor_update=False, data_aug_max_size=1333, 
+#                 data_aug_scale_overlap=None, data_aug_scales=[480, 512, 544, 576, 608, 640, 672, 704, 736, 768, 800], 
+#                 data_aug_scales2_crop=[384, 600], data_aug_scales2_resize=[400, 500, 600], dataset_file='coco', 
+#                 ddetr_lr_param=False, debug=False, dec_layer_number=None, dec_layers=6, dec_n_points=4, 
+#                 dec_pred_bbox_embed_share=True, dec_pred_class_embed_share=True, decoder_layer_noise=False, 
+#                 decoder_module_seq=['sa', 'ca', 'ffn'], decoder_sa_type='sa', device='cuda', dice_loss_coef=1.0, 
+#                 dilation=False, dim_feedforward=2048, dist_url='env://', distributed=False, dln_hw_noise=0.2, dln_xy_noise=0.2, 
+#                 dn_bbox_coef=1.0, dn_box_noise_scale=1.0, dn_label_coef=1.0, dn_label_noise_ratio=0.5, dn_labelbook_size=91, 
+#                 dn_number=100, dn_scalar=100, dropout=0.0, ema_decay=0.9997, ema_epoch=0, embed_init_tgt=True, enc_layers=6, 
+#                 enc_loss_coef=1.0, enc_n_points=4, epochs=12, eval=False, find_unused_params=False, finetune_ignore=None, 
+#                 fix_refpoints_hw=-1, fix_size=False, focal_alpha=0.25, frozen_weights=None, giou_loss_coef=2.0, hidden_dim=256, 
+#                 interm_loss_coef=1.0, local_rank=0, lr=0.0001, lr_backbone=1e-05, lr_backbone_names=['backbone.0'], lr_drop=11, 
+#                 lr_drop_list=[33, 45], lr_linear_proj_mult=0.1, lr_linear_proj_names=['reference_points', 'sampling_offsets'], 
+#                 mask_loss_coef=1.0, masks=False, match_unstable_error=True, matcher_type='HungarianMatcher', modelname='dino', 
+#                 multi_step_lr=False, nheads=8, nms_iou_threshold=-1, no_interm_box_loss=False, note='', num_classes=91, 
+#                 num_feature_levels=4, num_patterns=0, num_queries=900, num_select=300, num_workers=10, onecyclelr=False, 
+#                 options={'dn_scalar': 100, 'embed_init_tgt': True, 'dn_label_coef': 1.0, 'dn_bbox_coef': 1.0, 'use_ema': 
+#                          False, 'dn_box_noise_scale': 1.0}, 
+#                 output_dir='logs/DINO/R50-MS4', param_dict_type='default', pdetr3_bbox_embed_diff_each_layer=False, 
+#                 pdetr3_refHW=-1, pe_temperatureH=20, pe_temperatureW=20, position_embedding='sine', pre_norm=False, 
+#                 pretrain_model_path=None, query_dim=4, random_refpoints_xy=False, rank=0, remove_difficult=False, resume='', 
+#                 return_interm_indices=[1, 2, 3], save_checkpoint_interval=1, save_log=False, save_results=False, seed=42, 
+#                 set_cost_bbox=5.0, set_cost_class=2.0, set_cost_giou=2.0, start_epoch=0, test=False, transformer_activation='relu', 
+#                 two_stage_add_query_num=0, two_stage_bbox_embed_share=False, two_stage_class_embed_share=False, 
+#                 two_stage_default_hw=0.05, two_stage_keep_all_tokens=False, two_stage_learn_wh=False, two_stage_pat_embed=0, 
+#                 two_stage_type='standard', unic_layers=0, use_checkpoint=False, use_deformable_box_attn=False, 
+#                 use_detached_boxes_dec_out=False, use_dn=True, use_ema=False, weight_decay=0.0001, world_size=1)

@@ -118,7 +118,68 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         resstat.update({f'weight_{k}': v for k,v in criterion.weight_dict.items()})
     return resstat
 
+import numpy as np
+from terminaltables import AsciiTable
+import itertools
+def bbox2result(bboxes, labels, num_classes):
+        """Convert detection results to a list of numpy arrays.
 
+        Args:
+            bboxes (torch.Tensor | np.ndarray): shape (n, 5)
+            labels (torch.Tensor | np.ndarray): shape (n, )
+            num_classes (int): class number, including background class
+
+        Returns:
+            list(ndarray): bbox results of each class
+        """
+        if bboxes.shape[0] == 0:
+            return [np.zeros((0, 5), dtype=np.float32) for i in range(num_classes)]
+        else:
+            if isinstance(bboxes, torch.Tensor):
+                bboxes = bboxes.detach().cpu().numpy()
+                labels = labels.detach().cpu().numpy()
+            return [bboxes[labels == i, :] for i in range(num_classes)]
+        
+def batcheavlResult(results, coco_true, img_ids):
+    resultshead = []
+    for i in range(len(results)):
+            result = results[i]
+            scores = result['scores']
+            boxes = result['boxes']
+            labels = result['labels']
+            scores = scores.unsqueeze(1)
+            boxes = torch.cat((boxes,scores),dim=1)
+            resultshead.append((boxes, labels))
+
+    batchResults = [
+        bbox2result(det_bboxes, det_labels, 12)
+        for det_bboxes, det_labels in resultshead
+    ]
+    #print("bbox_results",bbox_results)
+    
+    batchAnnotations = []
+    for img_id in img_ids:
+        bboxes = []
+        labels = []
+        anns = coco_true.loadAnns(coco_true.getAnnIds(img_id))
+        for ann in anns:
+            bboxes.append(ann['bbox'])
+            labels.append(ann['category_id'])
+        if not bboxes:
+            bboxes = np.zeros((0, 4))
+            labels = np.zeros((0,))
+        else:
+            bboxes = np.array(bboxes, ndmin=2) - 1
+            labels = np.array(labels)
+        ann = dict(
+                bboxes=bboxes.astype(np.float32),
+                labels=labels.astype(np.int64))
+        batchAnnotations.append(ann)
+    #batchAnnotations = [{'bboxes':target['boxes'].detach().cpu().numpy(), 'labels': target['labels'].detach().cpu().numpy()}for target in targets]
+    return batchResults,batchAnnotations
+
+    # mean_ap, _ = eval_map(bbox_results,annotations,dataset=('Bicycle', 'Boat', 'Bottle', 'Bus', 'Car', 'Cat', 'Chair',
+    #         'Cup', 'Dog', 'Motorbike', 'People', 'Table'))
 @torch.no_grad()
 def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, output_dir, wo_class_error=False, args=None, logger=None):
     try:
@@ -155,6 +216,8 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
 
     _cnt = 0
     output_state_dict = {} # for debug only
+    total_results = []
+    total_annotations =[]
     for samples, targets in metric_logger.log_every(data_loader, 10, header, logger=logger):
         samples = samples.to(device)
 
@@ -190,6 +253,17 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
             target_sizes = torch.stack([t["size"] for t in targets], dim=0)
             results = postprocessors['segm'](results, outputs, orig_target_sizes, target_sizes)
         res = {target['image_id'].item(): output for target, output in zip(targets, results)}
+        
+        img_ids = [target['image_id'].item() for target in targets]
+        #print("orig_target_sizes",orig_target_sizes,"outputs",outputs,"results",results, "targets",targets)
+        coco_eva = coco_evaluator.coco_eval['bbox']
+        coco_true = coco_eva.cocoGt
+        #anns = coco_true.loadAnns(coco_true.getAnnIds(img_ids))
+        batchResults,batchAnnotations = batcheavlResult(results,coco_true,img_ids)
+        total_results.extend(batchResults)
+        total_annotations.extend(batchAnnotations)
+        #print("total_results",total_results,"total_annotations",total_annotations)
+        
 
         if coco_evaluator is not None:
             coco_evaluator.update(res)
@@ -255,7 +329,8 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
             if _cnt % 15 == 0:
                 print("BREAK!"*5)
                 break
-
+        
+        
     if args.save_results:
         import os.path as osp
         
@@ -273,10 +348,50 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
     if panoptic_evaluator is not None:
         panoptic_evaluator.synchronize_between_processes()
 
+    
+    from evaluation import eval_map
+    #print("total_results",total_results,"total_annotations",total_annotations)
+    print("start eval map")
+    # coco_true = coco_evaluator.coco_eval['bbox'].cocoGt
+    # coco_true.coco.loadAnns()
+    mean_ap, _ = eval_map(total_results,total_annotations,dataset=('Bicycle', 'Boat', 'Bottle', 'Bus', 'Car', 'Cat', 'Chair',
+               'Cup', 'Dog', 'Motorbike', 'People', 'Table'))
     # accumulate predictions from all images
     if coco_evaluator is not None:
         coco_evaluator.accumulate()
         coco_evaluator.summarize()
+        # *******add class wise
+        coco_eva = coco_evaluator.coco_eval['bbox']
+        precisions = coco_eva.eval['precision']
+        #print("precisions",precisions.shape)
+        #precisions (10, 101, 12, 4, 3)
+        # precision: (iou, recall, cls, area range, max dets)
+        coco_true = coco_eva.cocoGt
+        cat_ids = sorted(coco_true.getCatIds())
+        assert len(cat_ids) == precisions.shape[2]
+
+        results_per_category = []
+        classwisestats = coco_eva.classwisestats
+        for idx, catId in enumerate(cat_ids):
+            # area range index 0: all area ranges
+            # max dets index -1: typically 100 per image
+            nm = coco_true.loadCats(catId)[0]
+            ap = classwisestats[catId]
+            results_per_category.append(
+                (f'{nm["name"]}', f'{float(ap):0.3f}'))
+
+        num_columns = min(6, len(results_per_category) * 2)
+        results_flatten = list(
+            itertools.chain(*results_per_category))
+        headers = ['category', 'AP'] * (num_columns // 2)
+        results_2d = itertools.zip_longest(*[
+            results_flatten[i::num_columns]
+            for i in range(num_columns)
+        ])
+        table_data = [headers]
+        table_data += [result for result in results_2d]
+        table = AsciiTable(table_data)
+        print('\n' + table.table)
         
     panoptic_res = None
     if panoptic_evaluator is not None:

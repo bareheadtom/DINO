@@ -339,6 +339,10 @@ class DeformableTransformer(nn.Module):
             enc_outputs_class_unselected = self.enc_out_class_embed(output_memory)
             enc_outputs_coord_unselected = self.enc_out_bbox_embed(output_memory) + output_proposals # (bs, \sum{hw}, 4) unsigmoid
             topk = self.num_queries
+            #print("output_memory",output_memory.shape)
+            #print("enc_outputs_class_unselected",enc_outputs_class_unselected.shape)
+            #print("enc_outputs_class_unselected.max(-1)",enc_outputs_class_unselected.max(-1).shape)
+            #print("enc_outputs_class_unselected.max(-1)[0]",enc_outputs_class_unselected.max(-1)[0].shape,"topk",topk)
             topk_proposals = torch.topk(enc_outputs_class_unselected.max(-1)[0], topk, dim=1)[1] # bs, nq
 
             # gather boxes
@@ -514,6 +518,8 @@ class TransformerEncoder(nn.Module):
         Outpus: 
             - output: [bs, sum(hi*wi), 256]
         """
+        #print("\nsrc.shape,pos.shape,spatial_shapes.shape,level_start_index.shape,valid_ratios.shape,key_padding_mask.shape")
+        #print(src.shape,pos.shape,spatial_shapes.shape,level_start_index.shape,valid_ratios,key_padding_mask.shape)
         if self.two_stage_type in ['no', 'standard', 'enceachlayer', 'enclayer1']:
             assert ref_token_index is None
 
@@ -659,6 +665,13 @@ class TransformerDecoder(nn.Module):
                 valid_ratios: Optional[Tensor] = None,
                 
                 ):
+        # tot = tgt,memory,tgt_mask,memory_mask,tgt_key_padding_mask,memory_key_padding_mask,pos,refpoints_unsigmoid
+        # for t in tot:
+        #     if t is not None:
+        #         print(t.shape)
+        #     else:
+        #         print("None")
+        # print(level_start_index,spatial_shapes,valid_ratios)
         """
         Input:
             - tgt: nq, bs, d_model
@@ -806,6 +819,7 @@ class DeformableTransformerEncoderLayer(nn.Module):
 
     def forward(self, src, pos, reference_points, spatial_shapes, level_start_index, key_padding_mask=None):
         # self attention
+        #print(src.shape,pos.shape,reference_points.shape,spatial_shapes,level_start_index,key_padding_mask.shape)
         src2 = self.self_attn(self.with_pos_embed(src, pos), reference_points, src, spatial_shapes, level_start_index, key_padding_mask)
         src = src + self.dropout1(src2)
         src = self.norm1(src)
@@ -974,6 +988,8 @@ class DeformableTransformerDecoderLayer(nn.Module):
                 self_attn_mask: Optional[Tensor] = None, # mask used for self-attention
                 cross_attn_mask: Optional[Tensor] = None, # mask used for cross-attention
             ):
+       
+        
 
         for funcname in self.module_seq:
             if funcname == 'ffn':

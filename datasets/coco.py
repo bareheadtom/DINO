@@ -22,6 +22,7 @@ from pycocotools import mask as coco_mask
 from datasets.data_util import preparing_dataset
 import datasets.transforms as T
 from util.box_ops import box_cxcywh_to_xyxy, box_iou
+from util.misc import get_local_rank, get_local_size
 
 __all__ = ['build']
 
@@ -357,7 +358,7 @@ class CocoDetection(torchvision.datasets.CocoDetection):
         image_id = self.ids[idx]
         target = {'image_id': image_id, 'annotations': target}
         img, target = self.prepare(img, target)
-        
+        #print("before transforem",target)
         if self._transforms is not None:
             img, target = self._transforms(img, target)
 
@@ -640,6 +641,32 @@ def build(image_set, args):
 
     return dataset
 
+def build_exdark(image_set, args):
+    PATHS = {
+        "train": ('/root/autodl-tmp/Exdark/JPEGImages/IMGS', '/root/autodl-tmp/Exdark/cocoAnno/instances_exdark_train.json'),
+        "val": ('/root/autodl-tmp/Exdark/JPEGImages/IMGS', '/root/autodl-tmp/Exdark/cocoAnno/instances_exdark_val.json'),
+    }
+
+    aux_target_hacks_list = get_aux_target_hacks_list(image_set, args)
+
+    # copy to local path
+    # if os.environ.get('DATA_COPY_SHILONG') == 'INFO':
+    #     preparing_dataset(dict(img_folder=img_folder, ann_file=ann_file), image_set, args)
+
+    try:
+        strong_aug = args.strong_aug
+    except:
+        strong_aug = False
+
+    img_folder, ann_file = PATHS[image_set]
+    # dataset = CocoDetection(img_folder, ann_file, transforms=make_coco_transforms(image_set), return_masks=args.masks,
+    #                         cache_mode=args.cache_mode, local_rank=get_local_rank(), local_size=get_local_size())
+    dataset = CocoDetection(img_folder, ann_file, 
+            transforms=make_coco_transforms(image_set, fix_size=args.fix_size, strong_aug=strong_aug, args=args), 
+            return_masks=args.masks,
+            aux_target_hacks=aux_target_hacks_list,
+        )
+    return dataset
 
 
 if __name__ == "__main__":

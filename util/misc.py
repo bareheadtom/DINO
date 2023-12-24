@@ -462,6 +462,17 @@ def get_rank():
         return 0
     return dist.get_rank()
 
+def get_local_size():
+    if not is_dist_avail_and_initialized():
+        return 1
+    return int(os.environ['LOCAL_SIZE'])
+
+
+def get_local_rank():
+    if not is_dist_avail_and_initialized():
+        return 0
+    return int(os.environ['LOCAL_RANK'])
+
 
 def is_main_process():
     return get_rank() == 0

@@ -142,6 +142,7 @@ def dn_post_process(outputs_class, outputs_coord, dn_meta, aux_loss, _set_aux_lo
         post process of dn after output from the transformer
         put the dn part in the dn_meta
     """
+    #print("outputs_class",outputs_class,"outputs_coord",outputs_coord,"dn_meta",dn_meta,"aux_loss",aux_loss)
     if dn_meta and dn_meta['pad_size'] > 0:
         output_known_class = outputs_class[:, :, :dn_meta['pad_size'], :]
         output_known_coord = outputs_coord[:, :, :dn_meta['pad_size'], :]
