@@ -156,14 +156,19 @@ def batcheavlResult(results, coco_true, img_ids):
         for det_bboxes, det_labels in resultshead
     ]
     #print("bbox_results",bbox_results)
-    
+    from util import box_ops
+
     batchAnnotations = []
     for img_id in img_ids:
         bboxes = []
         labels = []
         anns = coco_true.loadAnns(coco_true.getAnnIds(img_id))
         for ann in anns:
-            bboxes.append(ann['bbox'])
+            x_c, y_c, w, h = ann['bbox'][0],ann['bbox'][1],ann['bbox'][2],ann['bbox'][3]
+            b = [(x_c), (y_c),
+                (x_c + 1 * w), (y_c + 1 * h)] 
+            bboxes.append(b)
+            #bboxes.append(ann['bbox'])
             labels.append(ann['category_id'])
         if not bboxes:
             bboxes = np.zeros((0, 4))
@@ -255,7 +260,7 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
         res = {target['image_id'].item(): output for target, output in zip(targets, results)}
         
         img_ids = [target['image_id'].item() for target in targets]
-        #print("orig_target_sizes",orig_target_sizes,"outputs",outputs,"results",results, "targets",targets)
+        #print("orig_target_sizes",orig_target_sizes,"outputs pred_logits",outputs['pred_logits'], "outputs pred_boxes",outputs['pred_boxes'],"results",results, "targets",targets)
         coco_eva = coco_evaluator.coco_eval['bbox']
         coco_true = coco_eva.cocoGt
         #anns = coco_true.loadAnns(coco_true.getAnnIds(img_ids))
@@ -329,7 +334,7 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
             if _cnt % 15 == 0:
                 print("BREAK!"*5)
                 break
-        
+        #break
         
     if args.save_results:
         import os.path as osp
