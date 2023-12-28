@@ -24,7 +24,16 @@ from engine import evaluate, train_one_epoch, test
 
 #python main.py -c config/DINO/DINO_4scale.py --options dn_scalar=100 embed_init_tgt=TRUE dn_label_coef=1.0 dn_bbox_coef=1.0 use_ema=False dn_box_noise_scale=1.0 --finetune_ignore label_enc.weight class_embed --pretrain_model_path ./pretrained/checkpoint0033_4scale.pth > /root/autodl-tmp/outputs/DINO
 
-#python main.py -c config/DINO/DINO_4scale.py --options dn_scalar=100 embed_init_tgt=TRUE dn_label_coef=1.0 dn_bbox_coef=1.0 use_ema=False dn_box_noise_scale=1.0 --finetune_ignore label_enc.weight class_embed --resume /root/autodl-tmp/projects/DINO/logs/DINO/R50-MS4/R50-MS420231220201013/checkpoint0023.pth 
+#python main.py -c config/DINO/DINO_4scale.py --options dn_scalar=100 embed_init_tgt=TRUE dn_label_coef=1.0 dn_bbox_coef=1.0 use_ema=False dn_box_noise_scale=1.0 --resume /root/autodl-tmp/projects/DINO/logs/DINO/R50-MS4/R50-MS420231220201013/checkpoint0023.pth 
+
+#find /root/autodl-tmp/outputs/DINO/ -type d -size -119c -exec rm -rf {} \;
+outputPath = '/root/autodl-tmp/outputs/DINO/'+str(datetime.datetime.now().strftime("%Y%m%d%H%M%S")) + ""
+if outputPath:
+        Path(outputPath).mkdir(parents=True, exist_ok=True)
+import sys
+output_file_name = outputPath+"/out.log"
+file = open(output_file_name, "w+")
+sys.stdout = file
 
 def get_args_parser():
     parser = argparse.ArgumentParser('Set transformer detector', add_help=False)
@@ -43,7 +52,7 @@ def get_args_parser():
     parser.add_argument('--fix_size', action='store_true')
 
     # training parameters
-    parser.add_argument('--output_dir', default='/root/autodl-tmp/outputs/DINO/'+str(datetime.datetime.now().strftime("%Y%m%d%H%M%S")),
+    parser.add_argument('--output_dir', default=outputPath,
                         help='path where to save, empty for no saving')
     parser.add_argument('--note', default='',
                         help='add some notes to the experiment')
@@ -64,7 +73,7 @@ def get_args_parser():
     parser.add_argument('--save_results', action='store_true')
     parser.add_argument('--save_log', action='store_true')
 
-    parser.add_argument('--pre_encoder', default=False, type=bool,
+    parser.add_argument('--pre_encoder', default=True, type=bool,
                         help="use pre_encoder")
 
     # distributed training parameters
@@ -89,7 +98,6 @@ def build_model_main(args):
     return model, criterion, postprocessors
 
 def main(args):
-    
     utils.init_distributed_mode(args)
     # load cfg file and update the args
     print("Loading config file from {}".format(args.config_file))

@@ -8,6 +8,19 @@ from models.dino.deformable_transformer import DeformableTransformer,DeformableT
 import torch.nn as nn
 from models.dino.utils import sigmoid_focal_loss, MLP
 import copy
+
+import math, random
+import copy
+from typing import Optional
+
+import torch
+from torch import nn, Tensor
+
+from util.misc import inverse_sigmoid
+from models.dino.utils import gen_encoder_output_proposals, MLP,_get_activation_fn, gen_sineembed_for_position
+from models.dino.ops.modules import MSDeformAttn
+from models.dino.ops.functions import MSDeformAttnFunction
+from models.dino.transformer import TransformerEncoderLayer
 class TestDeformableTransformer(unittest.TestCase):
     def setUp(self):
         self.transformer= DeformableTransformer(
@@ -148,6 +161,71 @@ class TestDeformableTransformer(unittest.TestCase):
             if not (o ==None):
                 print(o.shape)
         #torch.Size([2, 1930, 256])
+    
+    def test_TransformerEncoder_withnormencoderlayer(self):
+        print("\n*********test_TransformerEncoder_withnormencoderlayer")
+        # deformableTransformerEncoderLayer = DeformableTransformerEncoderLayer(
+        #     d_model=256,
+        #     d_ffn=2048,
+        #     dropout=0.0,
+        #     activation="relu",
+        #     n_levels=4,
+        #     n_heads=8,
+        #     n_points=4,
+        #     add_channel_attention=False,
+        #     use_deformable_box_attn=False,
+        #     box_attn_type='roi_align'
+        # )
+        encoderLayer = TransformerEncoderLayer(
+            d_model=256,
+            nhead=8,
+            dim_feedforward=2048,
+            dropout=0.1,
+            activation='relu',
+            normalize_before=False
+        )
+        transformerEncoder = TransformerEncoder(
+            encoder_layer=encoderLayer,
+            num_layers=6,
+            norm=None,
+            d_model=256,
+            num_queries=900,
+            deformable_encoder=False,
+            enc_layer_share=False,
+            two_stage_type='standard'
+        )
+        transformerEncoder = transformerEncoder.to('cuda')
+        src_flatten = torch.randn(2,1930,256).to('cuda')
+        lvl_pos_embed_flatten = torch.randn(2,1930,256).to('cuda')
+        spatial_shapes = torch.tensor([[38,38],[19,19],[10,10],[5,5]]).to('cuda')
+        level_start_index = torch.tensor([0,1444,1805,1905]).to('cuda')
+        valid_ratios = torch.tensor([[[0., 0.],
+         [0., 0.],
+         [0., 0.],
+         [0., 0.]],
+
+        [[0., 0.],
+         [0., 0.],
+         [0., 0.],
+         [0., 0.]]]).to('cuda')
+        mask_flatten = torch.ones(2,1930,dtype=bool).to('cuda')
+        memory, enc_intermediate_output, enc_intermediate_refpoints = transformerEncoder(
+           src = src_flatten,
+           pos = lvl_pos_embed_flatten,
+           level_start_index=level_start_index,
+           spatial_shapes=spatial_shapes,
+           valid_ratios=valid_ratios,
+           key_padding_mask=mask_flatten 
+        )
+        out = memory, enc_intermediate_output, enc_intermediate_refpoints
+        for o in out:
+            if not (o ==None):
+                print(o.shape)
+            else:
+                print("None")
+        #torch.Size([2, 1930, 256])
+
+
 
     def t1est_TransformerDecoder(self):
         deformableTransformerDecoderLayer = DeformableTransformerDecoderLayer(
@@ -261,7 +339,41 @@ class TestDeformableTransformer(unittest.TestCase):
         print(output.shape)
         #torch.Size([2, 1930, 256])
 
-    def test_DeformableTransformerDecoderLayer(self):
+    def t1est_MSDeformAttn(self):
+        print("\n*********test_MSDeformAttn")
+        msda = MSDeformAttn(
+            d_model=256,
+            n_levels=4,
+            n_heads=8,
+            n_points=4
+        ).to('cuda')
+        src = torch.randn(2,1930,256).to('cuda')
+        pos = torch.randn(2,1930,256).to('cuda')
+        reference_points = torch.randn(2,1930,4,2).to('cuda')
+        spatial_shapes=torch.tensor([[38,38],[19,19],[10,10],[5,5]]).to('cuda')
+        level_start_index=torch.tensor([0,1444,1805,1905]).to('cuda')
+        key_padding_mask = torch.ones(2,1930,dtype=bool).to('cuda')
+        output = msda.forward(DeformableTransformerEncoderLayer.with_pos_embed(src,pos), reference_points,src, spatial_shapes,level_start_index,key_padding_mask)
+        print(output.shape)
+
+    def t1est_MSDeformAttnFunction(self):
+        print("\n*********test_MSDeformAttnFunction")
+        value = torch.randn(2,1930,8,32).to('cuda')
+        spatial_shapes=torch.tensor([[38,38],[19,19],[10,10],[5,5]]).to('cuda')
+        level_start_index=torch.tensor([0,1444,1805,1905]).to('cuda')
+        sample_locations=torch.randn(2,1930,8,4,4,2).to('cuda')
+        attention_weights = torch.randn(2,1930,8,4,4).to('cuda')
+        im2col_step = 64
+        output = MSDeformAttnFunction.apply(value,spatial_shapes,level_start_index,sample_locations,attention_weights,im2col_step)
+        print("output",output.shape)
+
+
+
+
+    
+        
+
+    def t1est_DeformableTransformerDecoderLayer(self):
         print("\n*********t1est_DeformableTransformerDecoderLayer")
         deformableTransformerDecoderLayer = DeformableTransformerDecoderLayer(
             d_model=256,

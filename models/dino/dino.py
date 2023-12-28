@@ -240,7 +240,8 @@ class DINO(nn.Module):
             samples = nested_tensor_from_tensor_list(samples)
         if self.pre_encoder != None:
             #print("preencoder",samples.tensors.shape)
-            _, _, x = self.pre_encoder(samples.tensors)
+            #_, _, x = self.pre_encoder(samples.tensors)
+            x = self.pre_encoder(samples.tensors)
             samples.tensors = x
             #print("after preencoder",samples.tensors.shape)
         features, poss = self.backbone(samples)
@@ -742,23 +743,27 @@ def build_dino(args):
     except:
         dec_pred_bbox_embed_share = True
 
+    from models.enhance.penet import PENet
     pre_encoder = None
     if args.pre_encoder:
-        initfcfg = dict(type='Pretrained',checkpoint='/root/autodl-tmp/projects/Illumination-Adaptive-Transformer/IAT_high/IAT_mmdetection/LOL_pretrain.pth')
-        checkpath = '/root/autodl-tmp/projects/Illumination-Adaptive-Transformer/IAT_high/IAT_mmdetection/LOL_pretrain.pth'
-        pre_encoder = IAT(in_dim=3, with_global=True,init_cfg=initfcfg)
-        precheckpoint = torch.load(checkpath, map_location='cpu')
-        mystat = pre_encoder.state_dict()
-        precheckpoint_new = {}
-        precheckpoint_miss = {}
-        for k, v in precheckpoint.items():
-            if k in mystat and v.shape == mystat[k].shape:
-                precheckpoint_new[k] = v
-            else:
-                precheckpoint_miss[k] = v
-        print("miss pre_encoder precheckpoint_miss",precheckpoint_miss)
-        mystat.update(precheckpoint_new)
-        pre_encoder.load_state_dict(mystat)
+        # initfcfg = dict(type='Pretrained',checkpoint='/root/autodl-tmp/projects/Illumination-Adaptive-Transformer/IAT_high/IAT_mmdetection/LOL_pretrain.pth')
+        # checkpath = '/root/autodl-tmp/projects/Illumination-Adaptive-Transformer/IAT_high/IAT_mmdetection/LOL_pretrain.pth'
+        # pre_encoder = IAT(in_dim=3, with_global=True,init_cfg=initfcfg)
+        # precheckpoint = torch.load(checkpath, map_location='cpu')
+        # mystat = pre_encoder.state_dict()
+        # precheckpoint_new = {}
+        # precheckpoint_miss = {}
+        # for k, v in precheckpoint.items():
+        #     if k in mystat and v.shape == mystat[k].shape:
+        #         precheckpoint_new[k] = v
+        #     else:
+        #         precheckpoint_miss[k] = v
+        # print("miss pre_encoder precheckpoint_miss",precheckpoint_miss)
+        # mystat.update(precheckpoint_new)
+        # pre_encoder.load_state_dict(mystat)
+
+        pre_encoder = PENet()
+        print(" use PENet as pre_encoder")
     else:
         print("not use pre_encoder")
 
