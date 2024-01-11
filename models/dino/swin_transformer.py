@@ -5,7 +5,9 @@
 # --------------------------------------------------------
 # modified from https://github.com/SwinTransformer/Swin-Transformer-Object-Detection/blob/master/mmdet/models/backbones/swin_transformer.py
 # --------------------------------------------------------
-
+import sys
+#sys.path.append('../../')
+sys.path.append('/root/autodl-fs/projects/DINO')
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -724,5 +726,9 @@ if __name__ == "__main__":
     model = build_swin_transformer('swin_L_384_22k', 384, dilation=True)
     x = torch.rand(2, 3, 1024, 1024)
     y = model.forward_raw(x)
+    for t in y:
+        print("t",t.shape)
+    #print("y",y.shape)
     x = torch.rand(2, 3, 384, 384)
     y = model.forward_raw(x)
+    #print("y",y.shape)
